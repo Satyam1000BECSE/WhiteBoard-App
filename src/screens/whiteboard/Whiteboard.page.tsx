@@ -14,8 +14,7 @@ export const Whiteboard = () => {
   const [brushSize, setBrushSize] = useState(5);
   const [pencilType, setPencilType] = useState("normal");
   const [text, setText] = useState("");
-  const [drawingHistory, setDrawingHistory] = useState([]);
-  const [currentHistoryIndex, setCurrentHistoryIndex] = useState(-1);
+  
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<string[]>([]);
 
@@ -60,11 +59,14 @@ export const Whiteboard = () => {
     }
   };
 
+  const [drawingHistory, setDrawingHistory] = useState<string[]>([]);
+  const [currentHistoryIndex, setCurrentHistoryIndex] = useState<number>(0);
+  
   const addToHistory = (canvas: HTMLCanvasElement) => {
     const newHistory = [...drawingHistory];
-    newHistory.push(canvas.toDataURL());
-    setDrawingHistory(newHistory);
-    setCurrentHistoryIndex(newHistory.length - 1);
+    newHistory.push(canvas.toDataURL());  // canvas.toDataURL() returns a string
+    setDrawingHistory(newHistory);  // Update the history array
+    setCurrentHistoryIndex(newHistory.length - 1);  // Set the new current index to the last item in the history
   };
 
   const undo = (canvas: HTMLCanvasElement) => {
