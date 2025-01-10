@@ -4,7 +4,7 @@ import socket from "../../socket";
 import { useParams } from "next/navigation"; // Extract params from URL
 import SwatchColorPicker from "./SwatchColorPicker";
 import CircleColorPicker from "./CircleColorPicker";
-import { Typography } from "antd";
+import { Typography, Button, Input } from "antd";
 
 export const Whiteboard = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -13,7 +13,34 @@ export const Whiteboard = () => {
   const [color, setColor] = useState("#000000");
   const [brushSize, setBrushSize] = useState(5);
   const [pencilType, setPencilType] = useState("normal");
+  const [text, setText] = useState("");
+  const [drawingHistory, setDrawingHistory] = useState([]);
+  const [currentHistoryIndex, setCurrentHistoryIndex] = useState(-1);
+  const [message, setMessage] = useState("");
+  const [messages, setMessages] = useState<string[]>([]);
 
+
+  // Handle sending a message
+  const sendMessage = () => {
+    if (message.trim()) {
+      console.log("Sending message:", message);  // Debug log
+
+      socket.emit("sendMessage", { sessionId, message });
+      setMessage(""); // Clear input field
+    }
+  };
+
+  useEffect(() => {
+    socket.on("receiveMessage", (data) => {
+      console.log("Received message:", data.message);  // Debug log
+
+      setMessages((prevMessages) => [...prevMessages, data.message]);
+    });
+
+    return () => {
+      socket.off("receiveMessage");
+    };
+  }, []);
   const setDrawingStyles = (ctx: CanvasRenderingContext2D) => {
     ctx.lineWidth = brushSize;
     ctx.lineCap = "round";
@@ -31,6 +58,68 @@ export const Whiteboard = () => {
     } else {
       ctx.setLineDash([]);
     }
+  };
+
+  const addToHistory = (canvas: HTMLCanvasElement) => {
+    const newHistory = [...drawingHistory];
+    newHistory.push(canvas.toDataURL());
+    setDrawingHistory(newHistory);
+    setCurrentHistoryIndex(newHistory.length - 1);
+  };
+
+  const undo = (canvas: HTMLCanvasElement) => {
+    if (currentHistoryIndex > 0) {
+      setCurrentHistoryIndex(currentHistoryIndex - 1);
+      const prevState = drawingHistory[currentHistoryIndex - 1];
+      const ctx = canvas.getContext("2d");
+      const img = new Image();
+      img.onload = () => {
+        ctx?.clearRect(0, 0, canvas.width, canvas.height);
+        ctx?.drawImage(img, 0, 0);
+      };
+      img.src = prevState;
+
+      // Emit the undo action to the server
+      socket.emit("undo", {
+        sessionId,
+        historyIndex: currentHistoryIndex - 1,
+        state: prevState,
+      });
+    }
+  };
+
+  const redo = (canvas: HTMLCanvasElement) => {
+    if (currentHistoryIndex < drawingHistory.length - 1) {
+      setCurrentHistoryIndex(currentHistoryIndex + 1);
+      const nextState = drawingHistory[currentHistoryIndex + 1];
+      const ctx = canvas.getContext("2d");
+      const img = new Image();
+      img.onload = () => {
+        ctx?.clearRect(0, 0, canvas.width, canvas.height);
+        ctx?.drawImage(img, 0, 0);
+      };
+      img.src = nextState;
+
+      // Emit the redo action to the server
+      socket.emit("redo", {
+        sessionId,
+        historyIndex: currentHistoryIndex + 1,
+        state: nextState,
+      });
+    }
+  };
+
+
+  const exportCanvas = (canvas: HTMLCanvasElement) => {
+    const dataUrl = canvas.toDataURL("image/png");
+    const link = document.createElement("a");
+    link.href = dataUrl;
+    link.download = "whiteboard.png";
+    link.click();
+  };
+
+  const handleTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setText(e.target.value);
   };
 
   useEffect(() => {
@@ -78,7 +167,20 @@ export const Whiteboard = () => {
     const handleMouseUp = () => {
       setDrawing(false);
       context.closePath();
+      addToHistory(canvas);
     };
+    socket.on("updateDrawingState", (data) => {
+      const { state } = data;
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext("2d");
+
+      const img = new Image();
+      img.onload = () => {
+        ctx?.clearRect(0, 0, canvas.width, canvas.height);
+        ctx?.drawImage(img, 0, 0);
+      };
+      img.src = state;
+    });
 
     socket.on("draw", (data) => {
       const { xPercent, yPercent, color, size } = data;
@@ -113,20 +215,25 @@ export const Whiteboard = () => {
     };
   }, [drawing, color, brushSize, pencilType]);
 
-  const handleColorChange = (newColor: {
-    hex: React.SetStateAction<string>;
-  }) => {
+  const handleColorChange = (newColor: { hex: React.SetStateAction<string> }) => {
     setColor(newColor.hex);
   };
 
-  const handleBrushSizeChange = (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
+  const handleclear = () => {
+    window.location.reload();
+    socket.emit("clear", { sessionId });
+
+  };
+  const handleBrushSizeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setBrushSize(Number(event.target.value));
   };
 
   const handlePencilTypeChange = (value: string) => {
     setPencilType(value);
+  };
+
+  const handleEraser = () => {
+    setColor("#FFFFFF");
   };
 
   return (
@@ -135,17 +242,37 @@ export const Whiteboard = () => {
       <div className="flex gap-x-20">
         <div className="flex flex-col gap-y-10">
           <div className="border border-slate-50 shadow-lg p-6 rounded-2xl">
-            <SwatchColorPicker
-              color={color}
-              onColorChange={handleColorChange}
-            />
+            <SwatchColorPicker color={color} onColorChange={handleColorChange} />
           </div>
           <div className="border border-slate-50 shadow-lg p-6 rounded-2xl">
-            <CircleColorPicker
-              color={color}
-              onColorChange={handleColorChange}
-            />
+            <CircleColorPicker color={color} onColorChange={handleColorChange} />
           </div>
+          <div>
+            {/* <Button onClick={() => undo(canvasRef.current!)} style={{ marginBottom: '10px' }}>
+              Undo
+            </Button>
+            <Button onClick={() => redo(canvasRef.current!)} style={{ marginBottom: '10px' }}>
+              Redo
+            </Button> */}
+            <Button onClick={() => exportCanvas(canvasRef.current!)} style={{ marginBottom: '10px' }}>
+              Export
+            </Button>
+            <Button onClick={handleclear} style={{ marginBottom: '10px' }}>
+              Clear All
+            </Button>
+          </div>
+          <Input
+            placeholder="Enter text here"
+            value={text}
+            onChange={handleTextChange}
+            onPressEnter={(e) => {
+              const ctx = canvasRef.current?.getContext("2d");
+              if (ctx) {
+                ctx.font = "30px Arial";
+                ctx.fillText(text, 50, 50);
+              }
+            }}
+          />
         </div>
         <div>
           <canvas
@@ -155,12 +282,9 @@ export const Whiteboard = () => {
             style={{ border: "1px solid gray", borderRadius: "50px" }}
           />
         </div>
-        <div>
-          <div className="border border-slate-50 shadow-lg p-6 rounded-2xl">
-            <Typography.Title
-              level={5}
-              className="!text-gray-500 !font-normal !mb-4"
-            >
+        <div className="absolute right-5">
+        <div className="border border-slate-50 shadow-lg p-6 rounded-2xl">
+            <Typography.Title level={5} className="!text-gray-500 !font-normal !mb-4">
               Brush Size
             </Typography.Title>
             <div className="flex gap-x-10">
@@ -173,7 +297,7 @@ export const Whiteboard = () => {
                 onChange={handleBrushSizeChange}
                 style={{
                   appearance: "none",
-                  width: "100%",
+                  width: "50px",
                   height: "6px",
                   background: "#4db6ac",
                   outline: "none",
@@ -187,25 +311,52 @@ export const Whiteboard = () => {
           </div>
 
           <div className="border border-slate-50 shadow-lg p-6 rounded-2xl mt-10">
-            <Typography.Title
-              level={5}
-              className="!text-gray-500 !font-normal !mb-4"
-            >
+            <Typography.Title level={5} className="!text-gray-500 !font-normal !mb-4">
               Pencil Type
             </Typography.Title>
             <select
               value={pencilType}
               onChange={(e) => handlePencilTypeChange(e.target.value)}
-              className="border border-[#009688] focus:outline-none focus:ring-0  p-2 rounded-lg"
-              style={{ width: "100%" }}
+              className="border border-[#009688] focus:ring-[#009688] focus:outline-none text-gray-700 text-sm rounded-lg"
             >
               <option value="normal">Normal</option>
               <option value="blurred">Blurred</option>
               <option value="dotted">Dotted</option>
             </select>
           </div>
+
+          <div className="mt-10">
+            <Button onClick={handleEraser}>Eraser</Button>
+          </div>
         </div>
       </div>
+      {/* <div>
+        <div className="border border-slate-50 shadow-lg p-6 rounded-2xl">
+          <div className="h-60 overflow-y-auto">
+            {messages.map((msg, index) => (
+              <div key={index} className="p-2">
+                <Typography.Text>{msg}</Typography.Text>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Type a message..."
+              className="flex-grow p-2 border border-gray-300 rounded-lg"
+            />
+            <button
+              onClick={sendMessage}
+              className="bg-teal-600 text-white px-4 py-2 rounded-lg"
+            >
+              Send
+            </button>
+          </div>
+        </div>
+      </div> */}
+
     </div>
   );
 };

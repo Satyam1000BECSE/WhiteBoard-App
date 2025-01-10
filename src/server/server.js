@@ -55,6 +55,24 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     console.log("A user disconnected");
   });
+  socket.on("undo", (data) => {
+    const { sessionId, historyIndex, state } = data;
+
+    // Broadcast the undo action to other users
+    socket.to(sessionId).emit("updateDrawingState", { historyIndex, state });
+  });
+
+  socket.on("redo", (data) => {
+    const { sessionId, historyIndex, state } = data;
+
+    // Broadcast the redo action to other users
+    socket.to(sessionId).emit("updateDrawingState", { historyIndex, state });
+  });
+  socket.on("sendMessage", (data) => {
+    const { sessionId, message } = data;
+    // Broadcast the message to everyone in the session
+    io.to(sessionId).emit("receiveMessage", { message });
+  });
 });
 
 server.listen(process.env.PORT || 4000, () => {
