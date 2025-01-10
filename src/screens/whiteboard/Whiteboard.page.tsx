@@ -174,15 +174,22 @@ export const Whiteboard = () => {
     socket.on("updateDrawingState", (data) => {
       const { state } = data;
       const canvas = canvasRef.current;
-      const ctx = canvas?.getContext("2d");
-
-      const img = new Image();
-      img.onload = () => {
-        ctx?.clearRect(0, 0, canvas.width, canvas.height);
-        ctx?.drawImage(img, 0, 0);
-      };
-      img.src = state;
+    
+      // Check if canvas is not null before proceeding
+      if (canvas) {
+        const ctx = canvas.getContext("2d");
+    
+        const img = new Image();
+        img.onload = () => {
+          if (ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+          }
+        };
+        img.src = state;
+      }
     });
+    
 
     socket.on("draw", (data) => {
       const { xPercent, yPercent, color, size } = data;
